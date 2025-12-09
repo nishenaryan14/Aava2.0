@@ -1,179 +1,173 @@
-"""
-Amazon Login and Purchase Automation Script
-
-Automates login, search, product selection, delivery pincode setting, cart addition, and checkout for a specified Amazon product.
-
-Setup:
-- Install Python 3.8+
-- pip install selenium
-- Download ChromeDriver and add to PATH
-- Set environment variables:
-    AMAZON_USERNAME, AMAZON_PASSWORD, AMAZON_ASIN, AMAZON_PINCODE
-
-Usage:
-    python amazon_purchase.py
-
-Troubleshooting:
-    - Ensure credentials are correct
-    - Update selectors if Amazon UI changes
-    - Review logs for errors
-
-Author: Senior Test Automation Engineer
-Date: 2024-06
-"""
-
 import os
-import sys
-import logging
 import time
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
-from selenium.webdriver.chrome.options import Options
 from selenium.common.exceptions import (
     NoSuchElementException,
     TimeoutException,
     WebDriverException,
-    ElementClickInterceptedException,
 )
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
+from dotenv import load_dotenv
 
-# ---- CONFIGURATION ----
-AMAZON_URL = "https://www.amazon.in/"
-ASIN = os.getenv("AMAZON_ASIN", "B088N8G9RL")
-PINCODE = os.getenv("AMAZON_PINCODE", "560001")
-USERNAME = os.getenv("AMAZON_USERNAME")
-PASSWORD = os.getenv("AMAZON_PASSWORD")
-LOG_FILE = "amazon_purchase.log"
+# Load environment variables from .env file for credentials and product details
+load_dotenv()
+AMAZON_USERNAME = os.getenv("AMAZON_USERNAME")
+AMAZON_PASSWORD = os.getenv("AMAZON_PASSWORD")
+AMAZON_ASIN = os.getenv("AMAZON_ASIN", "B088N8G9RL")
+AMAZON_PINCODE = os.getenv("AMAZON_PINCODE", "560001")
 
-# ---- LOGGING SETUP ----
-logging.basicConfig(
-    filename=LOG_FILE,
-    filemode="a",
-    format="%(asctime)s %(levelname)s %(message)s",
-    level=logging.INFO,
-)
-console = logging.StreamHandler()
-console.setLevel(logging.INFO)
-formatter = logging.Formatter('%(levelname)s: %(message)s')
-console.setFormatter(formatter)
-logging.getLogger('').addHandler(console)
+# Product URL template
+PRODUCT_URL = f"https://www.amazon.in/dp/{AMAZON_ASIN}"
 
-def validate_env():
-    missing = []
-    if not USERNAME:
-        missing.append("AMAZON_USERNAME")
-    if not PASSWORD:
-        missing.append("AMAZON_PASSWORD")
-    if missing:
-        logging.error(f"Missing environment variables: {', '.join(missing)}")
-        sys.exit(1)
+def log(message):
+    print(f"[AmazonAutomation] {message}")
 
-def get_product_url(asin):
-    return f"{AMAZON_URL}dp/{asin}"
-
-def wait_and_find(driver, by, value, timeout=15):
+def amazon_login(driver, username, password):
     try:
-        return WebDriverWait(driver, timeout).until(EC.presence_of_element_located((by, value)))
-    except TimeoutException:
-        logging.error(f"Element not found: {value}")
-        raise
+        driver.get("https://www.amazon.in/")
+        log("Navigated to Amazon homepage.")
+        sign_in_elem = WebDriverWait(driver, 10).until(
+            EC.element_to_be_clickable((By.ID, "nav-link-accountList"))
+        )
+        sign_in_elem.click()
+        log("Clicked Sign-In link.")
 
-def login_amazon(driver):
-    logging.info("Navigating to Amazon login page...")
-    driver.get(AMAZON_URL)
-    time.sleep(2)
-    try:
-        sign_in_btn = wait_and_find(driver, By.ID, "nav-link-accountList")
-        sign_in_btn.click()
-        email_field = wait_and_find(driver, By.ID, "ap_email")
-        email_field.send_keys(USERNAME)
+        email_elem = WebDriverWait(driver, 10).until(
+            EC.presence_of_element_located((By.ID, "ap_email"))
+        )
+        email_elem.send_keys(username)
         driver.find_element(By.ID, "continue").click()
-        password_field = wait_and_find(driver, By.ID, "ap_password")
-        password_field.send_keys(PASSWORD)
+        log("Entered username and clicked Continue.")
+
+        password_elem = WebDriverWait(driver, 10).until(
+            EC.presence_of_element_located((By.ID, "ap_password"))
+        )
+        password_elem.send_keys(password)
         driver.find_element(By.ID, "signInSubmit").click()
-        time.sleep(3)
-        # Check for CAPTCHA
+        log("Entered password and signed in.")
+
+        # Check for login errors or CAPTCHAs
+        time.sleep(2)
         if "authentication required" in driver.page_source.lower() or "captcha" in driver.page_source.lower():
-            logging.error("CAPTCHA detected. Manual intervention required.")
-            sys.exit(1)
-        logging.info("Login successful.")
+            log("Login failed due to CAPTCHA or authentication challenge.")
+            return False
+
+        log("Login successful.")
+        return True
     except (NoSuchElementException, TimeoutException) as e:
-        logging.error(f"Login failed: {e}")
-        sys.exit(1)
+        log(f"Error during login: {e}")
+        return False
 
 def set_delivery_pincode(driver, pincode):
-    logging.info(f"Setting delivery pincode: {pincode}")
     try:
-        # On product page, set pincode
-        pincode_btn = wait_and_find(driver, By.ID, "contextualIngressPtLabel_deliveryShortLine", timeout=10)
-        pincode_btn.click()
-        time.sleep(1)
-        pincode_input = wait_and_find(driver, By.ID, "GLUXZipUpdateInput", timeout=10)
+        driver.get(PRODUCT_URL)
+        log(f"Navigated to product page: {PRODUCT_URL}")
+
+        # Wait for location/pincode element and click to change
+        try:
+            deliver_elem = WebDriverWait(driver, 10).until(
+                EC.element_to_be_clickable((By.ID, "contextualIngressPtLabel_deliveryShortLine"))
+            )
+            deliver_elem.click()
+            log("Clicked delivery location link.")
+        except TimeoutException:
+            log("Delivery location link not found, trying alternate method.")
+
+        # Enter pincode
+        pincode_input = WebDriverWait(driver, 10).until(
+            EC.presence_of_element_located((By.ID, "GLUXZipUpdateInput"))
+        )
         pincode_input.clear()
         pincode_input.send_keys(pincode)
         driver.find_element(By.ID, "GLUXZipUpdate").click()
-        time.sleep(2)
-        logging.info("Pincode set successfully.")
-    except Exception as e:
-        logging.warning(f"Pincode setting failed or not needed: {e}")
+        log(f"Set delivery pincode to {pincode}.")
 
-def add_to_cart(driver):
-    logging.info("Adding product to cart...")
-    try:
-        add_cart_btn = wait_and_find(driver, By.ID, "add-to-cart-button", timeout=10)
-        add_cart_btn.click()
+        # Wait for pincode update confirmation
         time.sleep(2)
-        # Handle popup for protection plans, etc.
+        return True
+    except (NoSuchElementException, TimeoutException) as e:
+        log(f"Error setting delivery pincode: {e}")
+        return False
+
+def add_to_cart_and_checkout(driver):
+    try:
+        # Ensure we're on the product page
+        driver.get(PRODUCT_URL)
+        log("Ensured on product page for cart addition.")
+
+        # Add to cart
+        add_to_cart_btn = WebDriverWait(driver, 10).until(
+            EC.element_to_be_clickable((By.ID, "add-to-cart-button"))
+        )
+        add_to_cart_btn.click()
+        log("Clicked Add to Cart.")
+
+        # Wait for cart confirmation
+        WebDriverWait(driver, 10).until(
+            EC.presence_of_element_located((By.ID, "attach-sidesheet-view-cart-button"))
+        )
+        log("Product added to cart.")
+
+        # Proceed to checkout
+        proceed_btn = None
         try:
-            no_thanks_btn = driver.find_element(By.XPATH, "//input[@aria-labelledby='attachSiNoCoverage-announce']")
-            no_thanks_btn.click()
-            time.sleep(1)
-        except NoSuchElementException:
-            pass
-        logging.info("Product added to cart.")
-    except (NoSuchElementException, TimeoutException) as e:
-        logging.error(f"Add to cart failed: {e}")
-        sys.exit(1)
-
-def proceed_to_checkout(driver):
-    logging.info("Proceeding to checkout...")
-    try:
-        proceed_btn = wait_and_find(driver, By.ID, "hlb-ptc-btn-native", timeout=10)
+            proceed_btn = WebDriverWait(driver, 10).until(
+                EC.element_to_be_clickable((By.ID, "hlb-ptc-btn-native"))
+            )
+        except TimeoutException:
+            # Try alternate selector
+            proceed_btn = WebDriverWait(driver, 10).until(
+                EC.element_to_be_clickable((By.NAME, "proceedToRetailCheckout"))
+            )
         proceed_btn.click()
-        time.sleep(2)
-        logging.info("Checkout page loaded. Further steps (address/payment) require manual completion or extension.")
+        log("Proceeded to checkout.")
+
+        # Note: Address and payment steps may require manual intervention or further automation
+        log("Purchase flow (until checkout) completed successfully.")
+        return True
     except (NoSuchElementException, TimeoutException) as e:
-        logging.error(f"Proceed to checkout failed: {e}")
-        sys.exit(1)
+        log(f"Error during add to cart/checkout: {e}")
+        return False
 
 def main():
-    validate_env()
-    options = Options()
-    # Uncomment for headless execution
+    # Validate required inputs
+    if not AMAZON_USERNAME or not AMAZON_PASSWORD:
+        log("Amazon credentials are missing. Please set in environment or .env file.")
+        return
+    options = webdriver.ChromeOptions()
+    # Uncomment the following line for headless execution
     # options.add_argument("--headless")
-    options.add_argument("--disable-blink-features=AutomationControlled")
-    options.add_argument("--window-size=1200,800")
     try:
         driver = webdriver.Chrome(options=options)
+        driver.maximize_window()
+        log("Chrome browser launched.")
+
+        if not amazon_login(driver, AMAZON_USERNAME, AMAZON_PASSWORD):
+            log("Login failed. Exiting.")
+            driver.quit()
+            return
+
+        if not set_delivery_pincode(driver, AMAZON_PINCODE):
+            log("Failed to set delivery pincode. Exiting.")
+            driver.quit()
+            return
+
+        if not add_to_cart_and_checkout(driver):
+            log("Failed during add to cart or checkout. Exiting.")
+            driver.quit()
+            return
+
+        log("Amazon automation script completed successfully.")
     except WebDriverException as e:
-        logging.error(f"ChromeDriver initialization failed: {e}")
-        sys.exit(1)
-    try:
-        login_amazon(driver)
-        product_url = get_product_url(ASIN)
-        logging.info(f"Navigating to product page: {product_url}")
-        driver.get(product_url)
-        time.sleep(2)
-        set_delivery_pincode(driver, PINCODE)
-        add_to_cart(driver)
-        proceed_to_checkout(driver)
-        logging.info("Amazon purchase automation completed successfully.")
-    except Exception as e:
-        logging.error(f"Automation failed: {e}")
+        log(f"WebDriver error: {e}")
     finally:
-        driver.quit()
+        try:
+            driver.quit()
+        except Exception:
+            pass
 
 if __name__ == "__main__":
     main()
