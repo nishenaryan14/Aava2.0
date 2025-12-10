@@ -5,87 +5,94 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 import time
 
-def add_hp_mouse_to_cart(browser='chrome', base_url='https://www.amazon.com'):
+def add_hp_mouse_to_cart(browser='chrome', amazon_url='https://www.amazon.com'):
     """
-    Automates the process of searching for an HP mouse on Amazon and adding it to the cart.
+    Automates the process of searching for an HP mouse and adding it to the cart on Amazon.
+    
     Args:
-        browser (str): Browser type ('chrome' or 'firefox')
-        base_url (str): Amazon base URL
+        browser (str): Browser type ('chrome' or 'firefox').
+        amazon_url (str): URL of the Amazon homepage.
     Returns:
-        bool: True if the item was added to cart successfully, False otherwise
+        bool: True if product added to cart successfully, False otherwise.
     """
-    # Initialize WebDriver
-    if browser == 'chrome':
-        driver = webdriver.Chrome()
-    elif browser == 'firefox':
-        driver = webdriver.Firefox()
-    else:
-        raise ValueError('Unsupported browser: {}'.format(browser))
-
-    wait = WebDriverWait(driver, 15)
-    success = False
-
+    driver = None
     try:
-        # Step 1: Go to Amazon homepage
-        driver.get(base_url)
+        # Browser setup
+        if browser == 'chrome':
+            driver = webdriver.Chrome()
+        elif browser == 'firefox':
+            driver = webdriver.Firefox()
+        else:
+            raise ValueError('Unsupported browser: {}'.format(browser))
+        
         driver.maximize_window()
-
-        # Step 2: Search for 'HP mouse'
-        search_box = wait.until(EC.presence_of_element_located((By.ID, 'twotabsearchtextbox')))
+        driver.get(amazon_url)
+        
+        # Wait for search bar to be present
+        wait = WebDriverWait(driver, 15)
+        search_box = wait.until(
+            EC.presence_of_element_located((By.ID, 'twotabsearchtextbox'))
+        )
+        
+        # Search for "HP Mouse"
         search_box.clear()
-        search_box.send_keys('HP mouse')
+        search_box.send_keys('HP Mouse')
         search_box.send_keys(Keys.RETURN)
-
-        # Step 3: Wait for search results and select the first 'HP mouse' item
-        # Use product title containing 'HP' and 'mouse'
-        products = wait.until(EC.presence_of_all_elements_located((By.CSS_SELECTOR, 'div.s-main-slot div[data-component-type="s-search-result"]')))
-        item_found = False
+        
+        # Wait for search results
+        wait.until(
+            EC.presence_of_element_located((By.CSS_SELECTOR, "div.s-main-slot"))
+        )
+        time.sleep(2)  # Allow extra time for dynamic content
+        
+        # Find the first HP Mouse product (refined by checking title contains 'HP')
+        products = driver.find_elements(By.CSS_SELECTOR, "span.a-size-medium.a-color-base.a-text-normal")
+        hp_mouse_link = None
         for product in products:
-            try:
-                title_elem = product.find_element(By.CSS_SELECTOR, 'h2 a span')
-                title = title_elem.text.lower()
-                if 'hp' in title and 'mouse' in title:
-                    # Click on the product link
-                    product_link = product.find_element(By.CSS_SELECTOR, 'h2 a')
-                    driver.execute_script("arguments[0].scrollIntoView();", product_link)
-                    product_link.click()
-                    item_found = True
-                    break
-            except Exception:
-                continue
-
-        if not item_found:
-            print("No HP mouse found in search results.")
+            if 'hp' in product.text.lower() and 'mouse' in product.text.lower():
+                hp_mouse_link = product
+                break
+        
+        if not hp_mouse_link:
+            print("No HP Mouse found in search results.")
             return False
-
-        # Step 4: Switch to the new tab (Amazon opens product links in a new tab)
-        driver.switch_to.window(driver.window_handles[-1])
-
-        # Step 5: Wait for 'Add to Cart' button and click it
-        add_to_cart_btn = wait.until(EC.element_to_be_clickable((By.ID, 'add-to-cart-button')))
+        
+        # Click product link
+        hp_mouse_link.click()
+        
+        # Switch to new tab if opened
+        if len(driver.window_handles) > 1:
+            driver.switch_to.window(driver.window_handles[1])
+        
+        # Wait for Add to Cart button
+        add_to_cart_btn = wait.until(
+            EC.element_to_be_clickable((By.ID, 'add-to-cart-button'))
+        )
+        
+        # Click Add to Cart
         add_to_cart_btn.click()
-
-        # Step 6: Validate that the item was added to the cart
-        # Wait for confirmation - look for cart count or confirmation message
-        time.sleep(3)  # Allow time for cart update
-        cart_count_elem = driver.find_element(By.ID, 'nav-cart-count')
-        cart_count = int(cart_count_elem.text)
-        assert cart_count >= 1, "Cart count did not update as expected."
-
-        print("HP mouse successfully added to cart.")
-        success = True
-
+        
+        # Wait for cart confirmation
+        cart_msg = wait.until(
+            EC.presence_of_element_located((By.CSS_SELECTOR, "h1, div#sw-atc-details-single-container"))
+        )
+        
+        # Validate addition to cart
+        page_source = driver.page_source.lower()
+        success = 'added to cart' in page_source or 'added to your cart' in page_source
+        assert success, "HP Mouse not added to cart successfully."
+        
+        print("HP Mouse added to cart successfully!")
+        return True
+        
     except Exception as e:
-        print(f"Error during Amazon HP mouse add-to-cart test: {e}")
+        print(f"Error during Amazon add-to-cart test: {e}")
+        return False
     finally:
-        driver.quit()
-
-    return success
+        if driver:
+            driver.quit()
 
 if __name__ == "__main__":
-    # Example usage: run test on Chrome
+    # Example usage
     result = add_hp_mouse_to_cart(browser='chrome')
-    if result:
-        print("Test passed: HP mouse was added to cart.")
-    else:
-        print("Test failed: HP mouse was NOT added to cart.")
+    print("Test result:", "PASS" if result else "FAIL")
